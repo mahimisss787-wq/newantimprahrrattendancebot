@@ -38,7 +38,7 @@ CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "-1003493006883")
 GOOGLE_SCRIPT_URL = os.getenv("GOOGLE_SCRIPT_URL", "https://script.google.com/macros/s/AKfycbzwOoWOu259oj_JhS0TsX_215TyCloHBy0MLvKsQta4Fa_AszbbD1e_cCeZ5Yyoc9dE/exec")
 
 # ⏰ ATTENDANCE TIME WINDOW (IST)
-# Default: START_HOUR = 6 (6:00 AM IST), END_HOUR = 10 (10:00 AM IST)
+# Default: START_HOUR = 6 (6:00 AM IST), END_HOUR = 11 (11:00 PM IST)
 # अगर आपको समय बदलना हो तो नीचे 6 और 10 को बदल सकते हैं (24-Hour Format में)
 START_HOUR = int(os.getenv("ATTENDANCE_START_HOUR", "6"))
 END_HOUR = int(os.getenv("ATTENDANCE_END_HOUR", "10"))
