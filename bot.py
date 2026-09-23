@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 IST = pytz.timezone("Asia/Kolkata")
 
 # Credentials & Config
-BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8974478810:AAF-bDSFAVClkpScR5LldpcXw8Kz-58xq4Y")
+BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8974478810:AAG0ahUBX8GiJGQp7Tf0E6EMMp8XBG-lOPE")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "-1003493006883")
 GOOGLE_SCRIPT_URL = os.getenv("GOOGLE_SCRIPT_URL", "https://script.google.com/macros/s/AKfycbxqacWU1NM-H0CDFk9TGcogshzLOLvkiOYynsZkgY8VzLUPqKj4uZOi5bYQZuZ4idC7/exec")
 
