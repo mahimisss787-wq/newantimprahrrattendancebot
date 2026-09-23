@@ -32,12 +32,16 @@ logger = logging.getLogger(__name__)
 IST = pytz.timezone("Asia/Kolkata")
 
 # Credentials & Config
-BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8974478810:AAG0ahUBX8GiJGQp7Tf0E6EMMp8XBG-lOPE")
+BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN") or os.getenv("BOT_TOKEN") or "8974478810:AAG0ahUBX8GiJGQp7Tf0E6EMMp8XBG-lOPE"
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "-1003493006883")
-GOOGLE_SCRIPT_URL = os.getenv("GOOGLE_SCRIPT_URL", "https://script.google.com/macros/s/AKfycbxqacWU1NM-H0CDFk9TGcogshzLOLvkiOYynsZkgY8VzLUPqKj4uZOi5bYQZuZ4idC7/exec")
+# NEW GOOGLE APPS SCRIPT URL UPDATED BELOW
+GOOGLE_SCRIPT_URL = os.getenv("GOOGLE_SCRIPT_URL", "https://script.google.com/macros/s/AKfycbzwOoWOu259oj_JhS0TsX_215TyCloHBy0MLvKsQta4Fa_AszbbD1e_cCeZ5Yyoc9dE/exec")
 
+# ⏰ ATTENDANCE TIME WINDOW (IST)
+# Default: START_HOUR = 6 (6:00 AM IST), END_HOUR = 10 (10:00 AM IST)
+# अगर आपको समय बदलना हो तो नीचे 6 और 10 को बदल सकते हैं (24-Hour Format में)
 START_HOUR = int(os.getenv("ATTENDANCE_START_HOUR", "6"))
-END_HOUR = int(os.getenv("ATTENDANCE_END_HOUR", "21"))
+END_HOUR = int(os.getenv("ATTENDANCE_END_HOUR", "10"))
 
 # ----------- ASYNC GOOGLE APPS SCRIPT API WITH AUTO-RETRY ----------- #
 
@@ -299,11 +303,12 @@ async def handle_attendance(update: Update, context: ContextTypes.DEFAULT_TYPE):
     username = getattr(user, 'username', '') or ""
     umid = msg.message_id
 
+    # STRICT ATTENDANCE TIME WINDOW CHECK (IST)
     if not (START_HOUR <= hour < END_HOUR):
         start_fmt = format_hour(START_HOUR)
         end_fmt = format_hour(END_HOUR)
         sent = await msg.reply_text(
-            f"❌ Attendance/Leave is closed for today.\n\n⏰ Attendance timing: {start_fmt} – {end_fmt}\n\nPlease try again during attendance hours."
+            f"❌ Attendance/Leave is closed for today.\n\n⏰ Attendance timing: {start_fmt} – {end_fmt} (IST)\n\nPlease try again during attendance hours."
         )
         asyncio.create_task(delete_later(context.bot, chat.id, sent.message_id, 15))
         asyncio.create_task(delete_later(context.bot, chat.id, umid, 15))
