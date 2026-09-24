@@ -1,9 +1,10 @@
 import os
 import html
+import asyncio
 from datetime import datetime, time, timedelta
 import pytz
 from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram.ext import Application, MessageHandler, filters, ContextTypes
 import db
 
 BOT_TOKEN = os.getenv("BOT_TOKEN", "8974478810:AAEgxD-ikJrMwV_JSBJY9F45ppBhefoZjtg")
@@ -130,8 +131,12 @@ async def present_or_leave(update: Update, context: ContextTypes.DEFAULT_TYPE):
             chat_id=chat_id,
             text=f"❌ Attendance/Leave is closed for today.\n\n⏰ Attendance timing: {START_HOUR}:00 AM – {END_HOUR}:00 AM\n\nPlease try again tomorrow morning."
         )
-        context.job_queue.run_once(lambda c: c.bot.delete_message(chat_id, closed_msg.message_id), 15)
-        context.job_queue.run_once(lambda c: c.bot.delete_message(chat_id, user_msg_id), 15)
+        await asyncio.sleep(15)
+        try:
+            await context.bot.delete_message(chat_id=chat_id, message_id=closed_msg.message_id)
+            await context.bot.delete_message(chat_id=chat_id, message_id=user_msg_id)
+        except Exception:
+            pass
         return
 
     # Add attendance
@@ -150,8 +155,16 @@ async def present_or_leave(update: Update, context: ContextTypes.DEFAULT_TYPE):
             text=f"<b>✅ {html.escape(name)}, attendance/leave already marked for today</b>",
             parse_mode="HTML"
         )
-        context.job_queue.run_once(lambda c: c.bot.delete_message(chat_id, user_msg_id), 0.5)
-        context.job_queue.run_once(lambda c: c.bot.delete_message(chat_id, dup_msg.message_id), 10)
+        await asyncio.sleep(0.5)
+        try:
+            await context.bot.delete_message(chat_id=chat_id, message_id=user_msg_id)
+        except Exception:
+            pass
+        await asyncio.sleep(9.5)
+        try:
+            await context.bot.delete_message(chat_id=chat_id, message_id=dup_msg.message_id)
+        except Exception:
+            pass
         return
 
     # Calculate streak
@@ -177,62 +190,88 @@ async def present_or_leave(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply_text = f"<b>✅ {html.escape(name)}, attendance marked!</b>\n<code>🔥 {streak}-Day Streak!{badge}</code>" if is_present else f"<b>🍂 {html.escape(name)}, leave registered</b>"
     
     succ_msg = await context.bot.send_message(chat_id=chat_id, text=reply_text, parse_mode="HTML")
-    context.job_queue.run_once(lambda c: c.bot.delete_message(chat_id, user_msg_id), 0.5)
-    context.job_queue.run_once(lambda c: c.bot.delete_message(chat_id, succ_msg.message_id), 30)
+    await asyncio.sleep(0.5)
+    try:
+        await context.bot.delete_message(chat_id=chat_id, message_id=user_msg_id)
+    except Exception:
+        pass
+    await asyncio.sleep(29.5)
+    try:
+        await context.bot.delete_message(chat_id=chat_id, message_id=succ_msg.message_id)
+    except Exception:
+        pass
 
 async def mystatus(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = str(update.effective_user.id)
-    name = html.escape(update.effective_user.first_name or "Unknown")
-    user_msg_id = update.message.message_id
-    chat_id = update.effective_chat.id
+    try:
+        user_id = str(update.effective_user.id)
+        name = html.escape(update.effective_user.first_name or "Unknown")
+        user_msg_id = update.message.message_id
+        chat_id = update.effective_chat.id
 
-    all_att = db.get_all_attendance()
-    user_rows = [r for r in all_att if str(r.get("userId")) == user_id]
-    present_cnt = len([r for r in user_rows if str(r.get("status", "Present")).strip() == "Present"])
-    leave_cnt = len([r for r in user_rows if str(r.get("status", "")).strip() == "Leave"])
-    total_logs = len(user_rows)
-    rate = round((present_cnt / total_logs) * 100) if total_logs > 0 else 0
+        all_att = db.get_all_attendance()
+        user_rows = [r for r in all_att if str(r.get("userId")) == user_id]
+        present_cnt = len([r for r in user_rows if str(r.get("status", "Present")).strip() == "Present"])
+        leave_cnt = len([r for r in user_rows if str(r.get("status", "")).strip() == "Leave"])
+        total_logs = len(user_rows)
+        rate = round((present_cnt / total_logs) * 100) if total_logs > 0 else 0
 
-    now_ist = datetime.now(ist)
-    streak = 0
-    check_date = now_ist
-    while True:
-        d_str = check_date.strftime("%d-%m-%Y")
-        rec = next((r for r in user_rows if str(r.get("date")).strip() == d_str), None)
-        if rec and str(rec.get("status", "Present")).strip() == "Present":
-            streak += 1
-            check_date -= timedelta(days=1)
-        else:
-            break
+        now_ist = datetime.now(ist)
+        streak = 0
+        check_date = now_ist
+        while True:
+            d_str = check_date.strftime("%d-%m-%Y")
+            rec = next((r for r in user_rows if str(r.get("date")).strip() == d_str), None)
+            if rec and str(rec.get("status", "Present")).strip() == "Present":
+                streak += 1
+                check_date -= timedelta(days=1)
+            else:
+                break
 
-    badge = ""
-    if streak >= 30: badge = " 👑 [Legend]"
-    elif streak >= 15: badge = " 🌟 [Gold]"
-    elif streak >= 7: badge = " 🔥 [Silver]"
-    elif streak >= 3: badge = " ⚡ [Rising Star]"
+        badge = ""
+        if streak >= 30: badge = " 👑 [Legend]"
+        elif streak >= 15: badge = " 🌟 [Gold]"
+        elif streak >= 7: badge = " 🔥 [Silver]"
+        elif streak >= 3: badge = " ⚡ [Rising Star]"
 
-    text = f"<b>📊 ATTENDANCE SUMMARY: {name}</b>\n━━━━━━━━━━━━━━━━━━━━━━\n📅 <b>Total Logs:</b> <code>{total_logs}</code>\n✅ <b>Present Days:</b> <code>{present_cnt}</code>\n🍂 <b>Leave Days:</b> <code>{leave_cnt}</code>\n📈 <b>Attendance Rate:</b> <code>{rate}%</code>\n🔥 <b>Current Streak:</b> <code>{streak} Days{badge}</code>"
-    
-    msg = await context.bot.send_message(chat_id=chat_id, text=text, parse_mode="HTML")
-    context.job_queue.run_once(lambda c: c.bot.delete_message(chat_id, user_msg_id), 0.5)
-    context.job_queue.run_once(lambda c: c.bot.delete_message(chat_id, msg.message_id), 60)
+        text = f"<b>📊 ATTENDANCE SUMMARY: {name}</b>\n━━━━━━━━━━━━━━━━━━━━━━\n📅 <b>Total Logs:</b> <code>{total_logs}</code>\n✅ <b>Present Days:</b> <code>{present_cnt}</code>\n🍂 <b>Leave Days:</b> <code>{leave_cnt}</code>\n📈 <b>Attendance Rate:</b> <code>{rate}%</code>\n🔥 <b>Current Streak:</b> <code>{streak} Days{badge}</code>"
+        
+        msg = await context.bot.send_message(chat_id=chat_id, text=text, parse_mode="HTML")
+        await asyncio.sleep(0.5)
+        try:
+            await context.bot.delete_message(chat_id=chat_id, message_id=user_msg_id)
+        except Exception:
+            pass
+        await asyncio.sleep(59.5)
+        try:
+            await context.bot.delete_message(chat_id=chat_id, message_id=msg.message_id)
+        except Exception:
+            pass
+    except Exception as e:
+        print(f"[MYSTATUS ERROR]: {e}")
 
 async def export(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_msg_id = update.message.message_id
-    chat_id = update.effective_chat.id
-    today = datetime.now(ist).strftime("%d-%m-%Y")
-    csv_path = db.generate_csv_filepath()
-    all_att = db.get_all_attendance()
+    try:
+        user_msg_id = update.message.message_id
+        chat_id = update.effective_chat.id
+        today = datetime.now(ist).strftime("%d-%m-%Y")
+        csv_path = db.generate_csv_filepath()
+        all_att = db.get_all_attendance()
 
-    with open(csv_path, "rb") as doc:
-        await context.bot.send_document(
-            chat_id=chat_id,
-            document=doc,
-            filename=f"attendance_export_{today}.csv",
-            caption=f"📊 <b>Attendance Excel/CSV Export</b>\n📅 Generated on: <code>{today}</code>\nTotal Logs: <code>{len(all_att)}</code>",
-            parse_mode="HTML"
-        )
-    context.job_queue.run_once(lambda c: c.bot.delete_message(chat_id, user_msg_id), 0.5)
+        with open(csv_path, "rb") as doc:
+            await context.bot.send_document(
+                chat_id=chat_id,
+                document=doc,
+                filename=f"attendance_export_{today}.csv",
+                caption=f"📊 <b>Attendance Excel/CSV Export</b>\n📅 Generated on: <code>{today}</code>\nTotal Logs: <code>{len(all_att)}</code>",
+                parse_mode="HTML"
+            )
+        await asyncio.sleep(0.5)
+        try:
+            await context.bot.delete_message(chat_id=chat_id, message_id=user_msg_id)
+        except Exception:
+            pass
+    except Exception as e:
+        print(f"[EXPORT ERROR]: {e}")
 
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
@@ -240,8 +279,8 @@ def main():
     app.add_handler(MessageHandler(filters.ALL, track_user), group=1)
     app.add_handler(MessageHandler(filters.Regex(r"(?i)^/present"), present_or_leave))
     app.add_handler(MessageHandler(filters.Regex(r"(?i)^/leave"), present_or_leave))
-    app.add_handler(CommandHandler("mystatus", mystatus))
-    app.add_handler(CommandHandler("export", export))
+    app.add_handler(MessageHandler(filters.Regex(r"(?i)^/mystatus"), mystatus))
+    app.add_handler(MessageHandler(filters.Regex(r"(?i)^/(downloadreport|attendanceexport|att_export|export)"), export))
 
     job_queue = app.job_queue
     if job_queue:
