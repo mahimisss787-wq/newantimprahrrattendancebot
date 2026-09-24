@@ -32,10 +32,14 @@ let isMongoConnected = false;
 
 if (MONGODB_URI && MONGODB_URI.trim() !== '') {
   mongoose.connect(MONGODB_URI.trim())
-    .then(() => {
+    .then(async () => {
       isMongoConnected = true;
       console.log('✅ [DATABASE] Connected to MongoDB Atlas Cloud successfully!');
+      try {
+        const doc = await getDoc();
+      } catch(e){}
     })
+
     .catch(err => {
       console.error('❌ [DATABASE ERROR] MongoDB Connection Failed:', err.message);
       console.warn('⚠️ [DATABASE] Falling back to local DB file.');

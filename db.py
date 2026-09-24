@@ -11,9 +11,18 @@ db = None
 if MONGODB_URI and MONGODB_URI.strip():
     try:
         from pymongo import MongoClient
-        mongo_client = MongoClient(MONGODB_URI.strip(), serverSelectionTimeoutMS=5000)
+        import certifi
+        mongo_client = MongoClient(
+            MONGODB_URI.strip(),
+            tlsCAFile=certifi.where(),
+            serverSelectionTimeoutMS=7000
+        )
+        mongo_client.admin.command('ping')
         db = mongo_client.get_database("attendance_bot")
+        # Force initial creation so attendance_bot appears immediately in Atlas Data Explorer
+        db["setup"].update_one({"_id": "init"}, {"$set": {"status": "active", "connected_at": datetime.now().isoformat()}}, upsert=True)
         print("✅ [PYTHON DATABASE] Connected to MongoDB Atlas Cloud successfully!")
+
     except Exception as e:
         print(f"❌ [PYTHON DATABASE ERROR] MongoDB Connection Failed: {e}")
 
