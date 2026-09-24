@@ -9,18 +9,86 @@ const BOT_TOKEN = process.env.BOT_TOKEN || '8974478810:AAEgxD-ikJrMwV_JSBJY9F45p
 const GROUP_CHAT_ID = process.env.GROUP_CHAT_ID || '-1003493006883';
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID || '123XUsCdQRMTt_HtcHclEE8RRoFYoAl27KDBi1Ealn3E';
 
+// ⏰ ATTENDANCE TIME WINDOW (IST) - Railway Variables से बदल सकते हैं
+const START_HOUR = parseInt(process.env.ATTENDANCE_START_HOUR || '6');  // Default: 6 AM
+const END_HOUR = parseInt(process.env.ATTENDANCE_END_HOUR || '10');     // Default: 10 AM
+
 const bot = new Telegraf(BOT_TOKEN);
 
 // Google Sheets Authentication
 async function getDoc() {
+  let key = process.env.GOOGLE_PRIVATE_KEY || '';
+  // Clean surrounding quotes and format line breaks properly
+  key = key.trim();
+  if (key.startsWith('"') && key.endsWith('"')) {
+    key = key.slice(1, -1);
+  }
+  key = key.replace(/\\n/g, '\n');
+
+  const email = (process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || '').trim();
+
   const serviceAccountAuth = new JWT({
-    email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
-    key: (process.env.GOOGLE_PRIVATE_KEY || '').replace(/\\n/g, '\n'),
+    email: email,
+    key: key,
     scopes: ['https://www.googleapis.com/auth/spreadsheets'],
   });
   const doc = new GoogleSpreadsheet(SPREADSHEET_ID, serviceAccountAuth);
   await doc.loadInfo();
   return doc;
+}
+
+// Helper to get Attendance Sheet safely
+async function getAttendanceSheet(doc) {
+  let sheet = doc.sheetsByTitle['Attendance'] || 
+              doc.sheetsByTitle['attendance'] || 
+              doc.sheetsByTitle['Sheet1'] || 
+              doc.sheetsByIndex[0];
+
+  try {
+    await sheet.loadHeaderRow();
+  } catch (e) {
+    console.warn('[SHEET WARN] Could not load header row, setting default headers:', e.message);
+    try {
+      await sheet.setHeaderRow(['Date', 'User ID', 'Name', 'Username', 'Status', 'Reason']);
+    } catch (err) {
+      console.error('[SHEET ERROR] Failed setting default header row:', err.message);
+    }
+  }
+  return sheet;
+}
+
+// Helper to get Members Sheet safely
+async function getMembersSheet(doc) {
+  return doc.sheetsByTitle['Members'] || 
+         doc.sheetsByTitle['members'] || 
+         (doc.sheetsByIndex.length > 1 ? doc.sheetsByIndex[1] : doc.sheetsByIndex[0]);
+}
+
+// Build row object dynamically based on sheet's existing headers
+function buildRowObject(headerValues, data) {
+  if (!headerValues || headerValues.length === 0) {
+    return {
+      'Date': data.date,
+      'User ID': data.userId,
+      'Name': data.name,
+      'Username': data.username,
+      'Status': data.status,
+      'Reason': data.reason
+    };
+  }
+
+  const rowObj = {};
+  for (const header of headerValues) {
+    const norm = header.toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (norm === 'date') rowObj[header] = data.date;
+    else if (norm === 'userid' || norm === 'id' || norm === 'telegramid' || norm === 'memberid') rowObj[header] = data.userId;
+    else if (norm === 'name' || norm === 'fullname' || norm === 'membername') rowObj[header] = data.name;
+    else if (norm === 'username') rowObj[header] = data.username;
+    else if (norm === 'status') rowObj[header] = data.status;
+    else if (norm === 'reason') rowObj[header] = data.reason;
+    else rowObj[header] = '';
+  }
+  return rowObj;
 }
 
 function escapeHTML(str) {
@@ -85,8 +153,8 @@ cron.schedule('0 6 * * *', async () => {
 cron.schedule('0 21 * * *', async () => {
   try {
     const doc = await getDoc();
-    const membersSheet = doc.sheetsByTitle['Members'];
-    const attendanceSheet = doc.sheetsByIndex[0];
+    const membersSheet = await getMembersSheet(doc);
+    const attendanceSheet = await getAttendanceSheet(doc);
 
     const rawMembersRows = await membersSheet.getRows();
     const rawAttendanceRows = await attendanceSheet.getRows();
@@ -244,11 +312,10 @@ bot.hears(/^\/mystatus(@\w+)?$/, async (ctx) => {
   const userId = String(ctx.from.id);
   const name = escapeHTML(ctx.from.first_name || 'Unknown');
   const userMessageId = ctx.message.message_id;
-  const chatId = ctx.chat.id;
 
   try {
     const doc = await getDoc();
-    const sheet = doc.sheetsByIndex[0];
+    const sheet = await getAttendanceSheet(doc);
     const rows = await sheet.getRows();
     const allRows = rows.map(r => r.toObject());
 
@@ -304,7 +371,7 @@ bot.hears(/^(\/present|\/leave)(@\w+)?( .*)?$/i, async (ctx) => {
 
   const nowKolkata = DateTime.now().setZone('Asia/Kolkata');
   const hour = nowKolkata.hour;
-  const attendanceOpen = hour >= 6 && hour < 10; // 06:00 AM to 10:00 AM
+  const attendanceOpen = hour >= START_HOUR && hour < END_HOUR;
 
   const userId = String(ctx.from.id);
   const name = ctx.from.first_name || 'Unknown';
@@ -315,12 +382,11 @@ bot.hears(/^(\/present|\/leave)(@\w+)?( .*)?$/i, async (ctx) => {
   const reason = !isPresent ? (userText.split(' ').slice(1).join(' ') || 'No reason specified') : '';
   const today = nowKolkata.toFormat('dd-MM-yyyy');
 
-  const chatId = ctx.chat.id;
   const userMessageId = ctx.message.message_id;
 
   // CLOSED TIMING HANDLER
   if (!attendanceOpen) {
-    const closedMsgText = `❌ Attendance/Leave is closed for today.\n\n⏰ Attendance timing: 6:00 AM – 10:00 AM\n\nPlease try again tomorrow morning.`;
+    const closedMsgText = `❌ Attendance/Leave is closed for today.\n\n⏰ Attendance timing: ${START_HOUR}:00 AM – ${END_HOUR}:00 AM\n\nPlease try again tomorrow morning.`;
     const closedMsg = await ctx.reply(closedMsgText);
 
     setTimeout(() => {
@@ -333,7 +399,7 @@ bot.hears(/^(\/present|\/leave)(@\w+)?( .*)?$/i, async (ctx) => {
   // OPEN TIMING HANDLER
   try {
     const doc = await getDoc();
-    const sheet = doc.sheetsByIndex[0];
+    const sheet = await getAttendanceSheet(doc);
     const rows = await sheet.getRows();
     const allRows = rows.map(r => r.toObject());
 
@@ -382,15 +448,17 @@ bot.hears(/^(\/present|\/leave)(@\w+)?( .*)?$/i, async (ctx) => {
     else if (streakCount >= 7) badge = ' 🔥 [Silver]';
     else if (streakCount >= 3) badge = ' ⚡ [Rising Star]';
 
-    // Append to Google Sheets
-    await sheet.addRow({
-      'Date': today,
-      'User ID': userId,
-      'Name': name,
-      'Username': username,
-      'Status': status,
-      'Reason': reason
+    // Append to Google Sheets with dynamic header matching
+    const rowObj = buildRowObject(sheet.headerValues || [], {
+      date: today,
+      userId: userId,
+      name: name,
+      username: username,
+      status: status,
+      reason: reason
     });
+
+    await sheet.addRow(rowObj);
 
     let replyText = isPresent
       ? `<b>✅ ${name}, attendance marked!</b>\n<code>🔥 ${streakCount}-Day Streak!${badge}</code>`
@@ -410,6 +478,21 @@ bot.hears(/^(\/present|\/leave)(@\w+)?( .*)?$/i, async (ctx) => {
 
   } catch (err) {
     console.error('[ATTENDANCE ERROR]:', err);
+    try {
+      const email = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || 'service account email';
+      const errMsg = `⚠️ <b>Google Sheet Error!</b>\n\nData save nahi ho paya:\n<code>${escapeHTML(err.message || err)}</code>\n\n📌 <b>Fix:</b> Make sure your Google Sheet is shared with <b>Editor</b> access to:\n<code>${escapeHTML(email)}</code>`;
+      const errNotice = await ctx.reply(errMsg, { parse_mode: 'HTML' });
+
+      setTimeout(() => {
+        ctx.deleteMessage(userMessageId).catch(() => {});
+      }, 500);
+
+      setTimeout(() => {
+        ctx.deleteMessage(errNotice.message_id).catch(() => {});
+      }, 25000);
+    } catch (e) {
+      console.error('[ERROR NOTICE FAILED]:', e);
+    }
   }
 });
 
@@ -419,3 +502,4 @@ bot.launch().then(() => {
 
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
+
