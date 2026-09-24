@@ -1,95 +1,17 @@
 require('dotenv').config();
 const { Telegraf } = require('telegraf');
-const { GoogleSpreadsheet } = require('google-spreadsheet');
-const { JWT } = require('google-auth-library');
 const { DateTime } = require('luxon');
 const cron = require('node-cron');
+const db = require('./db');
 
 const BOT_TOKEN = process.env.BOT_TOKEN || '8974478810:AAEgxD-ikJrMwV_JSBJY9F45ppBhefoZjtg';
 const GROUP_CHAT_ID = process.env.GROUP_CHAT_ID || '-1003493006883';
-const SPREADSHEET_ID = process.env.SPREADSHEET_ID || '123XUsCdQRMTt_HtcHclEE8RRoFYoAl27KDBi1Ealn3E';
 
-// ⏰ ATTENDANCE TIME WINDOW (IST) - Railway Variables से बदल सकते हैं
+// ⏰ ATTENDANCE TIME WINDOW (IST)
 const START_HOUR = parseInt(process.env.ATTENDANCE_START_HOUR || '6');  // Default: 6 AM
 const END_HOUR = parseInt(process.env.ATTENDANCE_END_HOUR || '10');     // Default: 10 AM
 
 const bot = new Telegraf(BOT_TOKEN);
-
-// Google Sheets Authentication
-async function getDoc() {
-  let key = process.env.GOOGLE_PRIVATE_KEY || '';
-  // Clean surrounding quotes and format line breaks properly
-  key = key.trim();
-  if (key.startsWith('"') && key.endsWith('"')) {
-    key = key.slice(1, -1);
-  }
-  key = key.replace(/\\n/g, '\n');
-
-  const email = (process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || '').trim();
-
-  const serviceAccountAuth = new JWT({
-    email: email,
-    key: key,
-    scopes: ['https://www.googleapis.com/auth/spreadsheets'],
-  });
-  const doc = new GoogleSpreadsheet(SPREADSHEET_ID, serviceAccountAuth);
-  await doc.loadInfo();
-  return doc;
-}
-
-// Helper to get Attendance Sheet safely
-async function getAttendanceSheet(doc) {
-  let sheet = doc.sheetsByTitle['Attendance'] || 
-              doc.sheetsByTitle['attendance'] || 
-              doc.sheetsByTitle['Sheet1'] || 
-              doc.sheetsByIndex[0];
-
-  try {
-    await sheet.loadHeaderRow();
-  } catch (e) {
-    console.warn('[SHEET WARN] Could not load header row, setting default headers:', e.message);
-    try {
-      await sheet.setHeaderRow(['Date', 'User ID', 'Name', 'Username', 'Status', 'Reason']);
-    } catch (err) {
-      console.error('[SHEET ERROR] Failed setting default header row:', err.message);
-    }
-  }
-  return sheet;
-}
-
-// Helper to get Members Sheet safely
-async function getMembersSheet(doc) {
-  return doc.sheetsByTitle['Members'] || 
-         doc.sheetsByTitle['members'] || 
-         (doc.sheetsByIndex.length > 1 ? doc.sheetsByIndex[1] : doc.sheetsByIndex[0]);
-}
-
-// Build row object dynamically based on sheet's existing headers
-function buildRowObject(headerValues, data) {
-  if (!headerValues || headerValues.length === 0) {
-    return {
-      'Date': data.date,
-      'User ID': data.userId,
-      'Name': data.name,
-      'Username': data.username,
-      'Status': data.status,
-      'Reason': data.reason
-    };
-  }
-
-  const rowObj = {};
-  for (const header of headerValues) {
-    const norm = header.toLowerCase().replace(/[^a-z0-9]/g, '');
-    if (norm === 'date') rowObj[header] = data.date;
-    else if (norm === 'userid' || norm === 'id' || norm === 'telegramid' || norm === 'memberid') rowObj[header] = data.userId;
-    else if (norm === 'name' || norm === 'fullname' || norm === 'membername') rowObj[header] = data.name;
-    else if (norm === 'username') rowObj[header] = data.username;
-    else if (norm === 'status') rowObj[header] = data.status;
-    else if (norm === 'reason') rowObj[header] = data.reason;
-    else rowObj[header] = '';
-  }
-  return rowObj;
-}
 
 function escapeHTML(str) {
   return String(str || '')
@@ -98,41 +20,13 @@ function escapeHTML(str) {
     .replace(/>/g, '&gt;');
 }
 
-function findUserId(row) {
-  const keys = ['User ID', 'UserId', 'user id', 'ID', 'id', 'Telegram ID', 'TelegramID', 'Member ID'];
-  for (const k of keys) {
-    if (row[k] !== undefined && row[k] !== null && String(row[k]).trim() !== '') {
-      return String(row[k]).trim();
-    }
+// Auto-register members when they send any message
+bot.use(async (ctx, next) => {
+  if (ctx.from) {
+    db.registerMember(ctx.from.id, ctx.from.first_name, ctx.from.username).catch(() => {});
   }
-  for (const k of Object.keys(row)) {
-    const normalized = k.toLowerCase().replace(/[^a-z0-9]/g, '');
-    if (normalized === 'userid' || normalized === 'id' || normalized === 'telegramid') {
-      if (row[k] !== undefined && row[k] !== null && String(row[k]).trim() !== '') {
-        return String(row[k]).trim();
-      }
-    }
-  }
-  return '';
-}
-
-function findName(row) {
-  const keys = ['Name', 'name', 'Full Name', 'fullname', 'Member Name'];
-  for (const k of keys) {
-    if (row[k] !== undefined && row[k] !== null && String(row[k]).trim() !== '') {
-      return String(row[k]).trim();
-    }
-  }
-  for (const k of Object.keys(row)) {
-    const normalized = k.toLowerCase().replace(/[^a-z0-9]/g, '');
-    if (normalized === 'name' || normalized === 'fullname' || normalized === 'membername') {
-      if (row[k] !== undefined && row[k] !== null && String(row[k]).trim() !== '') {
-        return String(row[k]).trim();
-      }
-    }
-  }
-  return 'Unknown';
-}
+  return next();
+});
 
 // -------------------------------------------------------------
 // 1. Cron Job: 6:00 AM Daily Morning Announcement Message
@@ -148,59 +42,33 @@ cron.schedule('0 6 * * *', async () => {
 }, { timezone: 'Asia/Kolkata' });
 
 // -------------------------------------------------------------
-// 2. Cron Job: 9:00 PM Daily Attendance Report Summary
+// 2. Cron Job: 9:00 PM Daily Attendance Report Summary + CSV File
 // -------------------------------------------------------------
 cron.schedule('0 21 * * *', async () => {
   try {
-    const doc = await getDoc();
-    const membersSheet = await getMembersSheet(doc);
-    const attendanceSheet = await getAttendanceSheet(doc);
-
-    const rawMembersRows = await membersSheet.getRows();
-    const rawAttendanceRows = await attendanceSheet.getRows();
+    const members = await db.getAllMembers();
+    const attendance = await db.getAllAttendance();
 
     const today = DateTime.now().setZone('Asia/Kolkata').toFormat('dd-MM-yyyy');
     const yesterday = DateTime.now().setZone('Asia/Kolkata').minus({ days: 1 }).toFormat('dd-MM-yyyy');
     const dayBefore = DateTime.now().setZone('Asia/Kolkata').minus({ days: 2 }).toFormat('dd-MM-yyyy');
 
-    const rawMembers = rawMembersRows.map(r => r.toObject());
-    const rawAttendance = rawAttendanceRows.map(r => r.toObject());
-
-    const uniqueMembersMap = new Map();
-    for (const m of rawMembers) {
-      const uId = findUserId(m);
-      if (uId && !uniqueMembersMap.has(uId)) {
-        uniqueMembersMap.set(uId, { userId: uId, name: findName(m) });
-      }
-    }
-    const members = Array.from(uniqueMembersMap.values());
     const totalMembersCount = members.length;
 
-    const uniqueAttendanceMap = new Map();
-    for (const a of rawAttendance) {
-      const uId = findUserId(a);
-      const date = String(a['Date'] || a['date'] || '').trim();
-      const key = uId + '_' + date;
-      if (uId && date && !uniqueAttendanceMap.has(key)) {
-        uniqueAttendanceMap.set(key, a);
-      }
-    }
-    const attendance = Array.from(uniqueAttendanceMap.values());
+    const todayAttendance = attendance.filter(r => String(r.date).trim() === today);
+    const presentUsers = todayAttendance.filter(r => String(r.status || 'Present').trim() === 'Present');
+    const leaveUsers = todayAttendance.filter(r => String(r.status || '').trim() === 'Leave');
 
-    const todayAttendance = attendance.filter(r => String(r['Date'] || r['date'] || '').trim() === today);
-    const presentUsers = todayAttendance.filter(r => String(r['Status'] || r['status'] || 'Present').trim() === 'Present');
-    const leaveUsers = todayAttendance.filter(r => String(r['Status'] || r['status'] || '').trim() === 'Leave');
+    const presentUserIds = new Set(presentUsers.map(u => String(u.userId)));
+    const leaveUserIds = new Set(leaveUsers.map(u => String(u.userId)));
 
-    const presentUserIds = new Set(presentUsers.map(u => findUserId(u)));
-    const leaveUserIds = new Set(leaveUsers.map(u => findUserId(u)));
-
-    const absentUsers = members.filter(m => !presentUserIds.has(m.userId) && !leaveUserIds.has(m.userId));
+    const absentUsers = members.filter(m => !presentUserIds.has(String(m.userId)) && !leaveUserIds.has(String(m.userId)));
 
     const warnings = [];
     for (const member of absentUsers) {
-      const mId = member.userId;
-      const attendedYesterday = attendance.some(r => String(r['Date'] || r['date'] || '').trim() === yesterday && findUserId(r) === mId);
-      const attendedDayBefore = attendance.some(r => String(r['Date'] || r['date'] || '').trim() === dayBefore && findUserId(r) === mId);
+      const mId = String(member.userId);
+      const attendedYesterday = attendance.some(r => String(r.date).trim() === yesterday && String(r.userId) === mId);
+      const attendedDayBefore = attendance.some(r => String(r.date).trim() === dayBefore && String(r.userId) === mId);
       if (!attendedYesterday && !attendedDayBefore) {
         warnings.push(member.name);
       }
@@ -213,9 +81,9 @@ cron.schedule('0 21 * * *', async () => {
       let counter = 1;
       for (const user of users) {
         let line = '';
-        const name = escapeHTML(user.name || user.Name || 'Unknown');
+        const name = escapeHTML(user.name || 'Unknown');
         if (type === 'leave') {
-          const reason = escapeHTML(user.Reason || user.reason || 'No reason specified');
+          const reason = escapeHTML(user.reason || 'No reason specified');
           line = `  <b>${counter}.</b> <code>${name}</code>\n     ┗ <i>${reason}</i>\n`;
         } else {
           line = `  <b>${counter}.</b> <code>${name}</code>\n`;
@@ -287,14 +155,44 @@ cron.schedule('0 21 * * *', async () => {
     else absentMsg += '  <i>None</i>';
 
     await bot.telegram.sendMessage(GROUP_CHAT_ID, absentMsg, { parse_mode: 'HTML' });
-    console.log('[CRON] 9:00 PM Report sent successfully.');
+
+    // Auto-send Excel/CSV file report
+    const filePath = await db.generateCSVFilePath();
+    await bot.telegram.sendDocument(GROUP_CHAT_ID, { source: filePath, filename: `attendance_${today}.csv` }, { caption: `📁 Daily Attendance Excel/CSV Export (${today})` });
+
+    console.log('[CRON] 9:00 PM Report & CSV sent successfully.');
   } catch (err) {
     console.error('[CRON ERROR] 9 PM:', err);
   }
 }, { timezone: 'Asia/Kolkata' });
 
 // -------------------------------------------------------------
-// 3. Command: /admission form
+// 3. Command: /export (Download Excel/CSV Report)
+// -------------------------------------------------------------
+bot.hears(/^\/export(@\w+)?$/i, async (ctx) => {
+  const userMessageId = ctx.message.message_id;
+  try {
+    const today = DateTime.now().setZone('Asia/Kolkata').toFormat('dd-MM-yyyy');
+    const filePath = await db.generateCSVFilePath();
+    const allAttendance = await db.getAllAttendance();
+
+    await ctx.replyWithDocument({ source: filePath, filename: `attendance_export_${today}.csv` }, {
+      caption: `📊 <b>Attendance Excel/CSV Export</b>\n📅 Generated on: <code>${today}</code>\nTotal Logs: <code>${allAttendance.length}</code>`,
+      parse_mode: 'HTML'
+    });
+
+    // Delete user command after 500ms
+    setTimeout(() => {
+      ctx.deleteMessage(userMessageId).catch(() => {});
+    }, 500);
+  } catch (err) {
+    console.error('[COMMAND ERROR] /export:', err);
+    ctx.reply('⚠️ Failed to generate export file.').catch(() => {});
+  }
+});
+
+// -------------------------------------------------------------
+// 4. Command: /admission form
 // -------------------------------------------------------------
 bot.hears(/^\/[Aa]dmission ?[Ff]orm$/, async (ctx) => {
   try {
@@ -306,7 +204,7 @@ bot.hears(/^\/[Aa]dmission ?[Ff]orm$/, async (ctx) => {
 });
 
 // -------------------------------------------------------------
-// 4. Command: /mystatus
+// 5. Command: /mystatus
 // -------------------------------------------------------------
 bot.hears(/^\/mystatus(@\w+)?$/, async (ctx) => {
   const userId = String(ctx.from.id);
@@ -314,14 +212,10 @@ bot.hears(/^\/mystatus(@\w+)?$/, async (ctx) => {
   const userMessageId = ctx.message.message_id;
 
   try {
-    const doc = await getDoc();
-    const sheet = await getAttendanceSheet(doc);
-    const rows = await sheet.getRows();
-    const allRows = rows.map(r => r.toObject());
-
-    const userRows = allRows.filter(r => findUserId(r) === userId);
-    const presentCount = userRows.filter(r => String(r['Status'] || r['status'] || 'Present').trim() === 'Present').length;
-    const leaveCount = userRows.filter(r => String(r['Status'] || r['status'] || '').trim() === 'Leave').length;
+    const allRows = await db.getAllAttendance();
+    const userRows = allRows.filter(r => String(r.userId) === userId);
+    const presentCount = userRows.filter(r => String(r.status || 'Present').trim() === 'Present').length;
+    const leaveCount = userRows.filter(r => String(r.status || '').trim() === 'Leave').length;
     const totalLogs = userRows.length;
     const attendanceRate = totalLogs > 0 ? Math.round((presentCount / totalLogs) * 100) : 0;
 
@@ -329,8 +223,8 @@ bot.hears(/^\/mystatus(@\w+)?$/, async (ctx) => {
     let checkDate = DateTime.now().setZone('Asia/Kolkata');
     while (true) {
       const dateStr = checkDate.toFormat('dd-MM-yyyy');
-      const pastRecord = userRows.find(r => String(r['Date'] || r['date'] || '').trim() === dateStr);
-      if (pastRecord && String(pastRecord['Status'] || pastRecord['status'] || 'Present').trim() === 'Present') {
+      const pastRecord = userRows.find(r => String(r.date).trim() === dateStr);
+      if (pastRecord && String(pastRecord.status || 'Present').trim() === 'Present') {
         streakCount++;
         checkDate = checkDate.minus({ days: 1 });
       } else {
@@ -364,7 +258,7 @@ bot.hears(/^\/mystatus(@\w+)?$/, async (ctx) => {
 });
 
 // -------------------------------------------------------------
-// 5. Attendance Handler: /present & /leave
+// 6. Attendance Handler: /present & /leave
 // -------------------------------------------------------------
 bot.hears(/^(\/present|\/leave)(@\w+)?( .*)?$/i, async (ctx) => {
   if (ctx.chat.type === 'private') return;
@@ -398,19 +292,18 @@ bot.hears(/^(\/present|\/leave)(@\w+)?( .*)?$/i, async (ctx) => {
 
   // OPEN TIMING HANDLER
   try {
-    const doc = await getDoc();
-    const sheet = await getAttendanceSheet(doc);
-    const rows = await sheet.getRows();
-    const allRows = rows.map(r => r.toObject());
+    const success = await db.addAttendance({
+      date: today,
+      userId: userId,
+      name: name,
+      username: username,
+      status: status,
+      reason: reason
+    });
 
-    const already = allRows.find(r =>
-      String(r['Date'] || r['date'] || '').trim() === today &&
-      findUserId(r) === userId
-    );
-
-    if (already) {
+    if (!success) {
       // Already Marked Handler
-      const duplicateMsg = await ctx.reply(`<b>✅ ${name}, attendance/leave already marked</b>`, { parse_mode: 'HTML' });
+      const duplicateMsg = await ctx.reply(`<b>✅ ${name}, attendance/leave already marked for today</b>`, { parse_mode: 'HTML' });
 
       setTimeout(() => {
         ctx.deleteMessage(userMessageId).catch(() => {});
@@ -425,15 +318,16 @@ bot.hears(/^(\/present|\/leave)(@\w+)?( .*)?$/i, async (ctx) => {
     // Calculate Streak
     let streakCount = 0;
     if (isPresent) {
+      const allRows = await db.getAllAttendance();
       streakCount = 1;
       let checkDate = nowKolkata.minus({ days: 1 });
       while (true) {
         const dateStr = checkDate.toFormat('dd-MM-yyyy');
         const pastRecord = allRows.find(r =>
-          findUserId(r) === userId &&
-          String(r['Date'] || r['date'] || '').trim() === dateStr
+          String(r.userId) === userId &&
+          String(r.date).trim() === dateStr
         );
-        if (pastRecord && String(pastRecord['Status'] || pastRecord['status'] || 'Present').trim() === 'Present') {
+        if (pastRecord && String(pastRecord.status || 'Present').trim() === 'Present') {
           streakCount++;
           checkDate = checkDate.minus({ days: 1 });
         } else {
@@ -447,18 +341,6 @@ bot.hears(/^(\/present|\/leave)(@\w+)?( .*)?$/i, async (ctx) => {
     else if (streakCount >= 15) badge = ' 🌟 [Gold]';
     else if (streakCount >= 7) badge = ' 🔥 [Silver]';
     else if (streakCount >= 3) badge = ' ⚡ [Rising Star]';
-
-    // Append to Google Sheets with dynamic header matching
-    const rowObj = buildRowObject(sheet.headerValues || [], {
-      date: today,
-      userId: userId,
-      name: name,
-      username: username,
-      status: status,
-      reason: reason
-    });
-
-    await sheet.addRow(rowObj);
 
     let replyText = isPresent
       ? `<b>✅ ${name}, attendance marked!</b>\n<code>🔥 ${streakCount}-Day Streak!${badge}</code>`
@@ -478,28 +360,13 @@ bot.hears(/^(\/present|\/leave)(@\w+)?( .*)?$/i, async (ctx) => {
 
   } catch (err) {
     console.error('[ATTENDANCE ERROR]:', err);
-    try {
-      const email = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || 'service account email';
-      const errMsg = `⚠️ <b>Google Sheet Error!</b>\n\nData save nahi ho paya:\n<code>${escapeHTML(err.message || err)}</code>\n\n📌 <b>Fix:</b> Make sure your Google Sheet is shared with <b>Editor</b> access to:\n<code>${escapeHTML(email)}</code>`;
-      const errNotice = await ctx.reply(errMsg, { parse_mode: 'HTML' });
-
-      setTimeout(() => {
-        ctx.deleteMessage(userMessageId).catch(() => {});
-      }, 500);
-
-      setTimeout(() => {
-        ctx.deleteMessage(errNotice.message_id).catch(() => {});
-      }, 25000);
-    } catch (e) {
-      console.error('[ERROR NOTICE FAILED]:', e);
-    }
+    ctx.reply('⚠️ Error saving attendance.').catch(() => {});
   }
 });
 
 bot.launch().then(() => {
-  console.log('🚀 Telegram Attendance Bot is running...');
+  console.log('🚀 Telegram Attendance Bot (MongoDB Cloud + Local DB + CSV Mode) is running...');
 });
 
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
-

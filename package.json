@@ -1,15 +1,14 @@
 {
   "name": "telegram-attendance-bot",
   "version": "1.0.0",
-  "description": "Telegram Attendance Bot with Google Sheets & Auto Delete features",
+  "description": "Telegram Attendance Bot with MongoDB Cloud & CSV Export",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
     "telegraf": "^4.16.3",
-    "google-spreadsheet": "^4.1.4",
-    "google-auth-library": "^9.14.1",
+    "mongoose": "^8.7.0",
     "luxon": "^3.5.0",
     "node-cron": "^3.0.3",
     "dotenv": "^16.4.5"
