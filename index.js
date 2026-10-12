@@ -1,5 +1,5 @@
 require('dotenv').config();
-const { Telegraf } = require('telegraf');
+const { Telegraf, Markup } = require('telegraf');
 const { DateTime } = require('luxon');
 const cron = require('node-cron');
 const db = require('./db');
@@ -20,11 +20,78 @@ function escapeHTML(str) {
     .replace(/>/g, '&gt;');
 }
 
-// Auto-register members when they send any message
+function getAttendanceKeyboard() {
+  return Markup.inlineKeyboard([
+    [
+      Markup.button.callback('✅ Mark Present', 'btn_present'),
+      Markup.button.callback('🍂 Take Leave', 'btn_leave')
+    ]
+  ]);
+}
+
+// Pending Leave Requests in memory (userId -> { name, username, chatId, promptMsgId, timeout })
+const pendingLeaveRequests = new Map();
+
+// Auto-register members & intercept Leave Reason replies
 bot.use(async (ctx, next) => {
   if (ctx.from) {
     db.registerMember(ctx.from.id, ctx.from.first_name, ctx.from.username).catch(() => {});
   }
+
+  // Check if this message is a response to a pending Leave request
+  if (ctx.message && ctx.message.text && ctx.from) {
+    const userId = String(ctx.from.id);
+    if (pendingLeaveRequests.has(userId)) {
+      const pending = pendingLeaveRequests.get(userId);
+      const userText = ctx.message.text.trim();
+
+      // If user typed a command instead, let the command handler handle it
+      if (!userText.startsWith('/')) {
+        clearTimeout(pending.timeout);
+        pendingLeaveRequests.delete(userId);
+
+        const today = DateTime.now().setZone('Asia/Kolkata').toFormat('dd-MM-yyyy');
+
+        // Check reason validity (must be at least 3 characters)
+        if (userText.length < 3) {
+          const deniedMsg = await ctx.reply(
+            `❌ <b>LEAVE DENIED (REJECTED):</b> ${escapeHTML(pending.name)}\n━━━━━━━━━━━━━━━━━━━━━━\n⚠️ Sahi reason na likhne ke karan aapki Leave reject kar di gayi hai.`,
+            { parse_mode: 'HTML' }
+          );
+
+          setTimeout(() => {
+            ctx.deleteMessage(ctx.message.message_id).catch(() => {});
+            ctx.deleteMessage(pending.promptMsgId).catch(() => {});
+            ctx.deleteMessage(deniedMsg.message_id).catch(() => {});
+          }, 15000);
+          return;
+        }
+
+        // Accept Leave with reason
+        await db.addAttendance({
+          date: today,
+          userId: userId,
+          name: pending.name,
+          username: pending.username,
+          status: 'Leave',
+          reason: userText
+        });
+
+        const acceptedMsg = await ctx.reply(
+          `<b>🍂 ${escapeHTML(pending.name)}, aapki Leave ACCEPT kar li gayi hai! ✅</b>\n━━━━━━━━━━━━━━━━━━━━━━\n📝 <b>Karan (Reason):</b> <i>${escapeHTML(userText)}</i>`,
+          { parse_mode: 'HTML' }
+        );
+
+        setTimeout(() => {
+          ctx.deleteMessage(ctx.message.message_id).catch(() => {});
+          ctx.deleteMessage(pending.promptMsgId).catch(() => {});
+          ctx.deleteMessage(acceptedMsg.message_id).catch(() => {});
+        }, 25000);
+        return;
+      }
+    }
+  }
+
   return next();
 });
 
@@ -33,9 +100,9 @@ bot.use(async (ctx, next) => {
 // -------------------------------------------------------------
 cron.schedule('0 6 * * *', async () => {
   try {
-    const msg = `🌸 राधे राधे! आप सभी का स्वागत है। ☀️\n\n💚 Daily Attendance is now OPEN.\n\n⏰ Timing:\n🕕 06:00 AM – 10:00 AM (IST)\n\n📌 Mark your attendance by sending:\n👉🏻 /present\n\n📚 📚 Keep learning. Keep growing.\n✨ Have a wonderful day! 😍`;
-    await bot.telegram.sendMessage(GROUP_CHAT_ID, msg);
-    console.log('[CRON] 6:00 AM Announcement sent.');
+    const msg = `🌸 राधे राधे! आप सभी का स्वागत है। ☀️\n\n💚 Daily Attendance is now OPEN.\n\n⏰ Timing:\n🕕 06:00 AM – 10:00 AM (IST)\n\n📌 Niche diye buttons par click karke attendance lagayein:\n👉🏻 Click [✅ Mark Present] ya [🍂 Take Leave]\n\n📚 Keep learning. Keep growing.\n✨ Have a wonderful day! 😍`;
+    await bot.telegram.sendMessage(GROUP_CHAT_ID, msg, getAttendanceKeyboard());
+    console.log('[CRON] 6:00 AM Announcement sent with buttons.');
   } catch (err) {
     console.error('[CRON ERROR] 6 AM:', err);
   }
@@ -254,6 +321,237 @@ bot.hears(/^\/mystatus(@\w+)?$/, async (ctx) => {
 
   } catch (err) {
     console.error('[COMMAND ERROR] /mystatus:', err);
+  }
+});
+
+// -------------------------------------------------------------
+// 5.5 Command: /attendance (or /panel, /menu) - Opens Button Menu
+// -------------------------------------------------------------
+bot.hears(/^\/(attendance|panel|menu)(@\w+)?$/i, async (ctx) => {
+  try {
+    const text = `📋 <b>DAILY ATTENDANCE PANEL</b>\n━━━━━━━━━━━━━━━━━━━━━━\n⏰ <b>Timing:</b> <code>06:00 AM – 10:00 AM (IST)</code>\n\nNeeche diye gaye buttons par click karke apni attendance lagayein:`;
+    await ctx.reply(text, { parse_mode: 'HTML', ...getAttendanceKeyboard() });
+    if (ctx.message && ctx.message.message_id) {
+      setTimeout(() => {
+        ctx.deleteMessage(ctx.message.message_id).catch(() => {});
+      }, 500);
+    }
+  } catch (err) {
+    console.error('[COMMAND ERROR] /attendance:', err);
+  }
+});
+
+// -------------------------------------------------------------
+// Button Action: ✅ Mark Present
+// -------------------------------------------------------------
+bot.action('btn_present', async (ctx) => {
+  const nowKolkata = DateTime.now().setZone('Asia/Kolkata');
+  const hour = nowKolkata.hour;
+  const attendanceOpen = hour >= START_HOUR && hour < END_HOUR;
+
+  const user = ctx.from;
+  const userId = String(user.id);
+  const name = user.first_name || 'Unknown';
+  const username = user.username || '';
+  const today = nowKolkata.toFormat('dd-MM-yyyy');
+
+  if (!attendanceOpen) {
+    return ctx.answerCbQuery(`❌ Attendance closed hai!\n⏰ Timing: ${START_HOUR}:00 AM – ${END_HOUR}:00 AM`, { show_alert: true });
+  }
+
+  try {
+    const success = await db.addAttendance({
+      date: today,
+      userId: userId,
+      name: name,
+      username: username,
+      status: 'Present',
+      reason: ''
+    });
+
+    if (!success) {
+      return ctx.answerCbQuery(`✅ ${name}, aapki attendance aaj pehle se lagi hui hai!`, { show_alert: true });
+    }
+
+    // Calculate Streak
+    const allRows = await db.getAllAttendance();
+    let streakCount = 1;
+    let checkDate = nowKolkata.minus({ days: 1 });
+    while (true) {
+      const dateStr = checkDate.toFormat('dd-MM-yyyy');
+      const pastRecord = allRows.find(r =>
+        String(r.userId) === userId &&
+        String(r.date).trim() === dateStr
+      );
+      if (pastRecord && String(pastRecord.status || 'Present').trim() === 'Present') {
+        streakCount++;
+        checkDate = checkDate.minus({ days: 1 });
+      } else {
+        break;
+      }
+    }
+
+    let badge = '';
+    if (streakCount >= 30) badge = ' 👑 [Legend]';
+    else if (streakCount >= 15) badge = ' 🌟 [Gold]';
+    else if (streakCount >= 7) badge = ' 🔥 [Silver]';
+    else if (streakCount >= 3) badge = ' ⚡ [Rising Star]';
+
+    await ctx.answerCbQuery(`✅ Attendance Marked!\n🔥 ${streakCount}-Day Streak!${badge}`, { show_alert: true });
+
+    const successMsg = await ctx.reply(
+      `<b>✅ ${escapeHTML(name)}, attendance marked!</b>\n<code>🔥 ${streakCount}-Day Streak!${badge}</code>`,
+      { parse_mode: 'HTML' }
+    );
+    setTimeout(() => {
+      ctx.deleteMessage(successMsg.message_id).catch(() => {});
+    }, 20000);
+  } catch (err) {
+    console.error('[BTN_PRESENT ERROR]:', err);
+    ctx.answerCbQuery('⚠️ Error marking attendance.', { show_alert: true }).catch(() => {});
+  }
+});
+
+// -------------------------------------------------------------
+// Button Action: 🍂 Take Leave (Asks for Reason)
+// -------------------------------------------------------------
+bot.action('btn_leave', async (ctx) => {
+  const nowKolkata = DateTime.now().setZone('Asia/Kolkata');
+  const hour = nowKolkata.hour;
+  const attendanceOpen = hour >= START_HOUR && hour < END_HOUR;
+
+  const user = ctx.from;
+  const userId = String(user.id);
+  const name = user.first_name || 'Unknown';
+  const username = user.username || '';
+  const today = nowKolkata.toFormat('dd-MM-yyyy');
+
+  if (!attendanceOpen) {
+    return ctx.answerCbQuery(`❌ Leave window closed hai!\n⏰ Timing: ${START_HOUR}:00 AM – ${END_HOUR}:00 AM`, { show_alert: true });
+  }
+
+  try {
+    const allRows = await db.getAllAttendance();
+    const alreadyMarked = allRows.some(r => String(r.userId) === userId && String(r.date).trim() === today);
+    if (alreadyMarked) {
+      return ctx.answerCbQuery(`✅ ${name}, attendance/leave aaj pehle se register hai!`, { show_alert: true });
+    }
+
+    if (pendingLeaveRequests.has(userId)) {
+      return ctx.answerCbQuery('⏳ Aapka leave request already pending hai. Kripya reason reply karein!', { show_alert: true });
+    }
+
+    await ctx.answerCbQuery('📝 Kripya chat me leave ka reason (karan) likh kar reply karein.', { show_alert: false });
+
+    const chatId = ctx.chat.id;
+    const promptText = `🍂 <b>LEAVE REQUEST:</b> <a href="tg://user?id=${userId}">${escapeHTML(name)}</a>\n━━━━━━━━━━━━━━━━━━━━━━\n❓ <b>Aapko Leave kyu chahiye? Kripya apna reason (karan) likh kar bhejein:</b>\n\n<i>⏳ Aapke paas reason likhne ke liye 2 minute hain.\nAgar samay par reason nahi mila to Leave DENIED (reject) kar di jayegi!</i>`;
+
+    const cancelKeyboard = Markup.inlineKeyboard([
+      [Markup.button.callback('❌ Cancel Leave Request', `cancel_leave_${userId}`)]
+    ]);
+
+    const promptMsg = await ctx.reply(promptText, {
+      parse_mode: 'HTML',
+      reply_markup: {
+        force_reply: true,
+        ...cancelKeyboard.reply_markup
+      }
+    });
+
+    // 2-minute timer for timeout denial
+    const timeout = setTimeout(async () => {
+      if (pendingLeaveRequests.has(userId)) {
+        pendingLeaveRequests.delete(userId);
+        try {
+          const deniedNotice = await bot.telegram.sendMessage(
+            chatId,
+            `❌ <b>LEAVE DENIED (REJECTED):</b> <a href="tg://user?id=${userId}">${escapeHTML(name)}</a>\n━━━━━━━━━━━━━━━━━━━━━━\n⚠️ Samay par reason na milne ke karan aapki leave reject kar di gayi hai!`,
+            { parse_mode: 'HTML' }
+          );
+
+          setTimeout(() => {
+            bot.telegram.deleteMessage(chatId, deniedNotice.message_id).catch(() => {});
+            bot.telegram.deleteMessage(chatId, promptMsg.message_id).catch(() => {});
+          }, 15000);
+        } catch (e) {}
+      }
+    }, 120000); // 120 seconds
+
+    pendingLeaveRequests.set(userId, {
+      name,
+      username,
+      chatId,
+      promptMsgId: promptMsg.message_id,
+      timeout
+    });
+
+  } catch (err) {
+    console.error('[BTN_LEAVE ERROR]:', err);
+    ctx.answerCbQuery('⚠️ Error starting leave request.', { show_alert: true }).catch(() => {});
+  }
+});
+
+// -------------------------------------------------------------
+// Button Action: Cancel Leave Request
+// -------------------------------------------------------------
+bot.action(/^cancel_leave_(\d+)$/, async (ctx) => {
+  const targetUserId = ctx.match[1];
+  if (String(ctx.from.id) !== targetUserId) {
+    return ctx.answerCbQuery('❌ Yeh aapka leave request nahi hai.', { show_alert: true });
+  }
+
+  const pending = pendingLeaveRequests.get(targetUserId);
+  if (pending) {
+    clearTimeout(pending.timeout);
+    pendingLeaveRequests.delete(targetUserId);
+    await ctx.answerCbQuery('❌ Leave request cancel kar diya gaya.', { show_alert: true });
+    try {
+      await ctx.deleteMessage();
+    } catch (e) {}
+  } else {
+    await ctx.answerCbQuery('Request pehle hi complete ya expire ho chuki hai.', { show_alert: true });
+  }
+});
+
+// -------------------------------------------------------------
+// Button Action: 📊 My Status
+// -------------------------------------------------------------
+bot.action('btn_mystatus', async (ctx) => {
+  const userId = String(ctx.from.id);
+  const name = escapeHTML(ctx.from.first_name || 'Unknown');
+
+  try {
+    const allRows = await db.getAllAttendance();
+    const userRows = allRows.filter(r => String(r.userId) === userId);
+    const presentCount = userRows.filter(r => String(r.status || 'Present').trim() === 'Present').length;
+    const leaveCount = userRows.filter(r => String(r.status || '').trim() === 'Leave').length;
+    const totalLogs = userRows.length;
+    const attendanceRate = totalLogs > 0 ? Math.round((presentCount / totalLogs) * 100) : 0;
+
+    let streakCount = 0;
+    let checkDate = DateTime.now().setZone('Asia/Kolkata');
+    while (true) {
+      const dateStr = checkDate.toFormat('dd-MM-yyyy');
+      const pastRecord = userRows.find(r => String(r.date).trim() === dateStr);
+      if (pastRecord && String(pastRecord.status || 'Present').trim() === 'Present') {
+        streakCount++;
+        checkDate = checkDate.minus({ days: 1 });
+      } else {
+        break;
+      }
+    }
+
+    let badge = '';
+    if (streakCount >= 30) badge = ' 👑 [Legend]';
+    else if (streakCount >= 15) badge = ' 🌟 [Gold]';
+    else if (streakCount >= 7) badge = ' 🔥 [Silver]';
+    else if (streakCount >= 3) badge = ' ⚡ [Rising Star]';
+
+    const alertText = `📊 Status for ${name}:\n✅ Present: ${presentCount} | 🍂 Leave: ${leaveCount}\n📈 Rate: ${attendanceRate}%\n🔥 Streak: ${streakCount} Days${badge}`;
+    await ctx.answerCbQuery(alertText, { show_alert: true });
+  } catch (err) {
+    console.error('[BTN_MYSTATUS ERROR]:', err);
+    ctx.answerCbQuery('⚠️ Status check failed.', { show_alert: true }).catch(() => {});
   }
 });
 
