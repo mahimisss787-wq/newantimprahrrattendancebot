@@ -10,7 +10,16 @@ import db
 BOT_TOKEN = os.getenv("BOT_TOKEN", "8974478810:AAEgxD-ikJrMwV_JSBJY9F45ppBhefoZjtg")
 GROUP_CHAT_ID = os.getenv("GROUP_CHAT_ID", "-1003493006883")
 START_HOUR = int(os.getenv("ATTENDANCE_START_HOUR", "6"))
-END_HOUR = int(os.getenv("ATTENDANCE_END_HOUR", "10"))
+START_MINUTE = int(os.getenv("ATTENDANCE_START_MINUTE", "0"))
+END_HOUR = int(os.getenv("ATTENDANCE_END_HOUR", "11"))
+END_MINUTE = int(os.getenv("ATTENDANCE_END_MINUTE", "30"))
+TIMING_TEXT = "06:00 AM – 11:30 AM (IST)"
+
+def is_attendance_open(kolkata_dt):
+    current_mins = kolkata_dt.hour * 60 + kolkata_dt.minute
+    start_mins = START_HOUR * 60 + START_MINUTE
+    end_mins = END_HOUR * 60 + END_MINUTE
+    return start_mins <= current_mins <= end_mins
 
 ist = pytz.timezone("Asia/Kolkata")
 
@@ -91,7 +100,7 @@ async def morning_announcement(context: ContextTypes.DEFAULT_TYPE):
         msg = ("🌸 राधे राधे! आप सभी का स्वागत है। ☀️\n\n"
                "💚 Daily Attendance is now OPEN.\n\n"
                "⏰ Timing:\n"
-               "🕕 06:00 AM – 10:00 AM (IST)\n\n"
+               "🕕 06:00 AM – 11:30 AM (IST)\n\n"
                "📌 Niche diye buttons par click karke attendance lagayein:\n"
                "👉🏻 Click [✅ Mark Present] ya [🍂 Take Leave]\n\n"
                "📚 Keep learning. Keep growing.\n"
@@ -190,10 +199,10 @@ async def present_or_leave(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
 
     # Check timing
-    if not (START_HOUR <= hour < END_HOUR):
+    if not is_attendance_open(now_ist):
         closed_msg = await context.bot.send_message(
             chat_id=chat_id,
-            text=f"❌ Attendance/Leave is closed for today.\n\n⏰ Attendance timing: {START_HOUR}:00 AM – {END_HOUR}:00 AM\n\nPlease try again tomorrow morning."
+            text=f"❌ Attendance/Leave is closed for today.\n\n⏰ Attendance timing: {TIMING_TEXT}\n\nPlease try again tomorrow morning."
         )
         await asyncio.sleep(15)
         try:
@@ -340,7 +349,7 @@ async def export(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def attendance_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         msg = ("📋 <b>DAILY ATTENDANCE PANEL</b>\n━━━━━━━━━━━━━━━━━━━━━━\n"
-               "⏰ <b>Timing:</b> <code>06:00 AM – 10:00 AM (IST)</code>\n\n"
+               f"⏰ <b>Timing:</b> <code>{TIMING_TEXT}</code>\n\n"
                "Neeche diye gaye buttons par click karke apni attendance lagayein:")
         await update.message.reply_text(text=msg, parse_mode="HTML", reply_markup=get_attendance_keyboard())
         try:
@@ -359,7 +368,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     username = user.username or ""
 
     now_ist = datetime.now(ist)
-    hour = now_ist.hour
     today = now_ist.strftime("%d-%m-%Y")
 
     if data == "btn_mystatus":
@@ -392,8 +400,8 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # Check timing for Present / Leave
-    if not (START_HOUR <= hour < END_HOUR):
-        await query.answer(f"❌ Attendance closed hai!\n⏰ Timing: {START_HOUR}:00 AM – {END_HOUR}:00 AM", show_alert=True)
+    if not is_attendance_open(now_ist):
+        await query.answer(f"❌ Attendance closed hai!\n⏰ Timing: {TIMING_TEXT}", show_alert=True)
         return
 
     if data == "btn_present":

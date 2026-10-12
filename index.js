@@ -7,9 +7,19 @@ const db = require('./db');
 const BOT_TOKEN = process.env.BOT_TOKEN || '8974478810:AAEgxD-ikJrMwV_JSBJY9F45ppBhefoZjtg';
 const GROUP_CHAT_ID = process.env.GROUP_CHAT_ID || '-1003493006883';
 
-// ⏰ ATTENDANCE TIME WINDOW (IST)
-const START_HOUR = parseInt(process.env.ATTENDANCE_START_HOUR || '6');  // Default: 6 AM
-const END_HOUR = parseInt(process.env.ATTENDANCE_END_HOUR || '10');     // Default: 10 AM
+// ⏰ ATTENDANCE TIME WINDOW (IST): 06:00 AM – 11:30 AM
+const START_HOUR = parseInt(process.env.ATTENDANCE_START_HOUR || '6');
+const START_MINUTE = parseInt(process.env.ATTENDANCE_START_MINUTE || '0');
+const END_HOUR = parseInt(process.env.ATTENDANCE_END_HOUR || '11');
+const END_MINUTE = parseInt(process.env.ATTENDANCE_END_MINUTE || '30');
+const TIMING_TEXT = '06:00 AM – 11:30 AM (IST)';
+
+function isAttendanceOpen(dt) {
+  const currentMins = dt.hour * 60 + dt.minute;
+  const startMins = START_HOUR * 60 + START_MINUTE;
+  const endMins = END_HOUR * 60 + END_MINUTE;
+  return currentMins >= startMins && currentMins <= endMins;
+}
 
 const bot = new Telegraf(BOT_TOKEN);
 
@@ -100,7 +110,7 @@ bot.use(async (ctx, next) => {
 // -------------------------------------------------------------
 cron.schedule('0 6 * * *', async () => {
   try {
-    const msg = `🌸 राधे राधे! आप सभी का स्वागत है। ☀️\n\n💚 Daily Attendance is now OPEN.\n\n⏰ Timing:\n🕕 06:00 AM – 10:00 AM (IST)\n\n📌 Niche diye buttons par click karke attendance lagayein:\n👉🏻 Click [✅ Mark Present] ya [🍂 Take Leave]\n\n📚 Keep learning. Keep growing.\n✨ Have a wonderful day! 😍`;
+    const msg = `🌸 राधे राधे! आप सभी का स्वागत है। ☀️\n\n💚 Daily Attendance is now OPEN.\n\n⏰ Timing:\n🕕 06:00 AM – 11:30 AM (IST)\n\n📌 Niche diye buttons par click karke attendance lagayein:\n👉🏻 Click [✅ Mark Present] ya [🍂 Take Leave]\n\n📚 Keep learning. Keep growing.\n✨ Have a wonderful day! 😍`;
     await bot.telegram.sendMessage(GROUP_CHAT_ID, msg, getAttendanceKeyboard());
     console.log('[CRON] 6:00 AM Announcement sent with buttons.');
   } catch (err) {
@@ -329,7 +339,7 @@ bot.hears(/^\/mystatus(@\w+)?$/, async (ctx) => {
 // -------------------------------------------------------------
 bot.hears(/^\/(attendance|panel|menu)(@\w+)?$/i, async (ctx) => {
   try {
-    const text = `📋 <b>DAILY ATTENDANCE PANEL</b>\n━━━━━━━━━━━━━━━━━━━━━━\n⏰ <b>Timing:</b> <code>06:00 AM – 10:00 AM (IST)</code>\n\nNeeche diye gaye buttons par click karke apni attendance lagayein:`;
+    const text = `📋 <b>DAILY ATTENDANCE PANEL</b>\n━━━━━━━━━━━━━━━━━━━━━━\n⏰ <b>Timing:</b> <code>${TIMING_TEXT}</code>\n\nNeeche diye gaye buttons par click karke apni attendance lagayein:`;
     await ctx.reply(text, { parse_mode: 'HTML', ...getAttendanceKeyboard() });
     if (ctx.message && ctx.message.message_id) {
       setTimeout(() => {
@@ -346,8 +356,7 @@ bot.hears(/^\/(attendance|panel|menu)(@\w+)?$/i, async (ctx) => {
 // -------------------------------------------------------------
 bot.action('btn_present', async (ctx) => {
   const nowKolkata = DateTime.now().setZone('Asia/Kolkata');
-  const hour = nowKolkata.hour;
-  const attendanceOpen = hour >= START_HOUR && hour < END_HOUR;
+  const attendanceOpen = isAttendanceOpen(nowKolkata);
 
   const user = ctx.from;
   const userId = String(user.id);
@@ -356,7 +365,7 @@ bot.action('btn_present', async (ctx) => {
   const today = nowKolkata.toFormat('dd-MM-yyyy');
 
   if (!attendanceOpen) {
-    return ctx.answerCbQuery(`❌ Attendance closed hai!\n⏰ Timing: ${START_HOUR}:00 AM – ${END_HOUR}:00 AM`, { show_alert: true });
+    return ctx.answerCbQuery(`❌ Attendance closed hai!\n⏰ Timing: ${TIMING_TEXT}`, { show_alert: true });
   }
 
   try {
@@ -417,8 +426,7 @@ bot.action('btn_present', async (ctx) => {
 // -------------------------------------------------------------
 bot.action('btn_leave', async (ctx) => {
   const nowKolkata = DateTime.now().setZone('Asia/Kolkata');
-  const hour = nowKolkata.hour;
-  const attendanceOpen = hour >= START_HOUR && hour < END_HOUR;
+  const attendanceOpen = isAttendanceOpen(nowKolkata);
 
   const user = ctx.from;
   const userId = String(user.id);
@@ -427,7 +435,7 @@ bot.action('btn_leave', async (ctx) => {
   const today = nowKolkata.toFormat('dd-MM-yyyy');
 
   if (!attendanceOpen) {
-    return ctx.answerCbQuery(`❌ Leave window closed hai!\n⏰ Timing: ${START_HOUR}:00 AM – ${END_HOUR}:00 AM`, { show_alert: true });
+    return ctx.answerCbQuery(`❌ Leave window closed hai!\n⏰ Timing: ${TIMING_TEXT}`, { show_alert: true });
   }
 
   try {
@@ -562,8 +570,7 @@ bot.hears(/^(\/present|\/leave)(@\w+)?( .*)?$/i, async (ctx) => {
   if (ctx.chat.type === 'private') return;
 
   const nowKolkata = DateTime.now().setZone('Asia/Kolkata');
-  const hour = nowKolkata.hour;
-  const attendanceOpen = hour >= START_HOUR && hour < END_HOUR;
+  const attendanceOpen = isAttendanceOpen(nowKolkata);
 
   const userId = String(ctx.from.id);
   const name = ctx.from.first_name || 'Unknown';
@@ -578,7 +585,7 @@ bot.hears(/^(\/present|\/leave)(@\w+)?( .*)?$/i, async (ctx) => {
 
   // CLOSED TIMING HANDLER
   if (!attendanceOpen) {
-    const closedMsgText = `❌ Attendance/Leave is closed for today.\n\n⏰ Attendance timing: ${START_HOUR}:00 AM – ${END_HOUR}:00 AM\n\nPlease try again tomorrow morning.`;
+    const closedMsgText = `❌ Attendance/Leave is closed for today.\n\n⏰ Attendance timing: ${TIMING_TEXT}\n\nPlease try again tomorrow morning.`;
     const closedMsg = await ctx.reply(closedMsgText);
 
     setTimeout(() => {
