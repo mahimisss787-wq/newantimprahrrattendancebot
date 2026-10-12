@@ -97,15 +97,12 @@ async def handle_pending_leave_reply(update: Update, context: ContextTypes.DEFAU
 
 async def morning_announcement(context: ContextTypes.DEFAULT_TYPE):
     try:
-        msg = ("🌸 राधे राधे! आप सभी का स्वागत है। ☀️\n\n"
-               "💚 Daily Attendance is now OPEN.\n\n"
-               "⏰ Timing:\n"
-               "🕕 06:00 AM – 11:30 AM (IST)\n\n"
-               "📌 Niche diye buttons par click karke attendance lagayein:\n"
-               "👉🏻 Click [✅ Mark Present] ya [🍂 Take Leave]\n\n"
-               "📚 Keep learning. Keep growing.\n"
-               "✨ Have a wonderful day! 😍")
-        await context.bot.send_message(chat_id=GROUP_CHAT_ID, text=msg, reply_markup=get_attendance_keyboard())
+        msg = ("🌸 ʀᴀᴅʜᴇ ʀᴀᴅʜᴇ! ᴡᴇʟᴄᴏᴍᴇ ᴛᴏ ʏᴏᴜ ᴀʟʟ☀️\n"
+               "💗 ᴅᴀɪʟʏ ᴀᴛᴛᴇɴᴅᴀɴᴄᴇ ɪꜱ ɴᴏᴡ ᴏᴘᴇɴ\n"
+               "⏰ ᴀᴛᴛᴇɴᴅᴀɴᴄᴇ ᴛɪᴍɪɴɢ\n"
+               "🕕 <b>06:00 AM – 11:30 AM (IST)</b>\n"
+               "📌 ᴀᴘɴɪ ᴀᴛᴛᴇɴᴅᴀɴᴄᴇ ᴍᴀʀᴋ ᴋᴀʀɴᴇ ᴋᴇ ʟɪʏᴇ ɴɪᴄʜᴇ ᴅɪʏᴇ ɢᴀʏᴇ ʙᴜᴛᴛᴏɴꜱ ᴘᴀʀ ᴄʟɪᴄᴋ ᴋᴀʀᴇɴ. 💗")
+        await context.bot.send_message(chat_id=GROUP_CHAT_ID, text=msg, parse_mode="HTML", reply_markup=get_attendance_keyboard())
     except Exception as e:
         print(f"[CRON 6 AM ERROR]: {e}")
 
@@ -348,9 +345,11 @@ async def export(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def attendance_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
-        msg = ("📋 <b>DAILY ATTENDANCE PANEL</b>\n━━━━━━━━━━━━━━━━━━━━━━\n"
-               f"⏰ <b>Timing:</b> <code>{TIMING_TEXT}</code>\n\n"
-               "Neeche diye gaye buttons par click karke apni attendance lagayein:")
+        msg = ("🌸 ʀᴀᴅʜᴇ ʀᴀᴅʜᴇ! ᴡᴇʟᴄᴏᴍᴇ ᴛᴏ ʏᴏᴜ ᴀʟʟ☀️\n"
+               "💗 ᴅᴀɪʟʏ ᴀᴛᴛᴇɴᴅᴀɴᴄᴇ ɪꜱ ɴᴏᴡ ᴏᴘᴇɴ\n"
+               "⏰ ᴀᴛᴛᴇɴᴅᴀɴᴄᴇ ᴛɪᴍɪɴɢ\n"
+               "🕕 <b>06:00 AM – 11:30 AM (IST)</b>\n"
+               "📌 ᴀᴘɴɪ ᴀᴛᴛᴇɴᴅᴀɴᴄᴇ ᴍᴀʀᴋ ᴋᴀʀɴᴇ ᴋᴇ ʟɪʏᴇ ɴɪᴄʜᴇ ᴅɪʏᴇ ɢᴀʏᴇ ʙᴜᴛᴛᴏɴꜱ ᴘᴀʀ ᴄʟɪᴄᴋ ᴋᴀʀᴇɴ. 💗")
         await update.message.reply_text(text=msg, parse_mode="HTML", reply_markup=get_attendance_keyboard())
         try:
             await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=update.message.message_id)

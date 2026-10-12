@@ -110,8 +110,8 @@ bot.use(async (ctx, next) => {
 // -------------------------------------------------------------
 cron.schedule('0 6 * * *', async () => {
   try {
-    const msg = `🌸 राधे राधे! आप सभी का स्वागत है। ☀️\n\n💚 Daily Attendance is now OPEN.\n\n⏰ Timing:\n🕕 06:00 AM – 11:30 AM (IST)\n\n📌 Niche diye buttons par click karke attendance lagayein:\n👉🏻 Click [✅ Mark Present] ya [🍂 Take Leave]\n\n📚 Keep learning. Keep growing.\n✨ Have a wonderful day! 😍`;
-    await bot.telegram.sendMessage(GROUP_CHAT_ID, msg, getAttendanceKeyboard());
+    const msg = `🌸 ʀᴀᴅʜᴇ ʀᴀᴅʜᴇ! ᴡᴇʟᴄᴏᴍᴇ ᴛᴏ ʏᴏᴜ ᴀʟʟ☀️\n💗 ᴅᴀɪʟʏ ᴀᴛᴛᴇɴᴅᴀɴᴄᴇ ɪꜱ ɴᴏᴡ ᴏᴘᴇɴ\n⏰ ᴀᴛᴛᴇɴᴅᴀɴᴄᴇ ᴛɪᴍɪɴɢ\n🕕 <b>06:00 AM – 11:30 AM (IST)</b>\n📌 ᴀᴘɴɪ ᴀᴛᴛᴇɴᴅᴀɴᴄᴇ ᴍᴀʀᴋ ᴋᴀʀɴᴇ ᴋᴇ ʟɪʏᴇ ɴɪᴄʜᴇ ᴅɪʏᴇ ɢᴀʏᴇ ʙᴜᴛᴛᴏɴꜱ ᴘᴀʀ ᴄʟɪᴄᴋ ᴋᴀʀᴇɴ. 💗`;
+    await bot.telegram.sendMessage(GROUP_CHAT_ID, msg, { parse_mode: 'HTML', ...getAttendanceKeyboard() });
     console.log('[CRON] 6:00 AM Announcement sent with buttons.');
   } catch (err) {
     console.error('[CRON ERROR] 6 AM:', err);
@@ -339,7 +339,7 @@ bot.hears(/^\/mystatus(@\w+)?$/, async (ctx) => {
 // -------------------------------------------------------------
 bot.hears(/^\/(attendance|panel|menu)(@\w+)?$/i, async (ctx) => {
   try {
-    const text = `📋 <b>DAILY ATTENDANCE PANEL</b>\n━━━━━━━━━━━━━━━━━━━━━━\n⏰ <b>Timing:</b> <code>${TIMING_TEXT}</code>\n\nNeeche diye gaye buttons par click karke apni attendance lagayein:`;
+    const text = `🌸 ʀᴀᴅʜᴇ ʀᴀᴅʜᴇ! ᴡᴇʟᴄᴏᴍᴇ ᴛᴏ ʏᴏᴜ ᴀʟʟ☀️\n💗 ᴅᴀɪʟʏ ᴀᴛᴛᴇɴᴅᴀɴᴄᴇ ɪꜱ ɴᴏᴡ ᴏᴘᴇɴ\n⏰ ᴀᴛᴛᴇɴᴅᴀɴᴄᴇ ᴛɪᴍɪɴɢ\n🕕 <b>06:00 AM – 11:30 AM (IST)</b>\n📌 ᴀᴘɴɪ ᴀᴛᴛᴇɴᴅᴀɴᴄᴇ ᴍᴀʀᴋ ᴋᴀʀɴᴇ ᴋᴇ ʟɪʏᴇ ɴɪᴄʜᴇ ᴅɪʏᴇ ɢᴀʏᴇ ʙᴜᴛᴛᴏɴꜱ ᴘᴀʀ ᴄʟɪᴄᴋ ᴋᴀʀᴇɴ. 💗`;
     await ctx.reply(text, { parse_mode: 'HTML', ...getAttendanceKeyboard() });
     if (ctx.message && ctx.message.message_id) {
       setTimeout(() => {
